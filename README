@@ -1,0 +1,10 @@
+iimenu.sh:
+	- this relies on dmenu (http://tools.suckless.org/dmenu)
+	- server directories are assumed to exist in your /tmp
+	- press escape to exit
+iiview.sh
+	- somewhat buggy
+	- scrolling does not work (though 'b' can pass in a pinch
+	- written in ksh93, rather than portable POSIX sh
+	- I honestly don't know what a good chunk of this code is doing
+		
