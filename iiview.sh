@@ -1,109 +1,198 @@
-#!/bin/sh
+#!/bin/ksh
 
-printf "\e]2;%s\a" "${1%/}";
-printf "\e[?1049h";		# save scren
-printf "\e[J";			# clear screen
-printf "\e[0;0H";		# goto @(1,1)
-printf "\e[?25l";		# hide cursor
-stty -echo;
+trap "cleanup; exit;" TERM QUIT INT;
 
-defbg="\e[48;2;25;25;25m"
-bg="\e[48;2;30;30;30m";
-bgn="40";
+# globals
+typeset -A hashtable		# note, not actually a hashtable
+typeset -a line;
 
-channel="$1"
+channel="$1";
 
-trap 'cleanup' INT;
+function init
+{
+	printf "\E]2;%s\a" "${channel%/}";	# set term title
+	printf "\E[0m";				# unset graphic effects
+	printf "\E[?1049h";			# save scren
+	printf "\E[?25l";			# hide cursor
+	stty -echo;
+	defbg=$'\E[48;2;20;20;20m';
+	screen=$(tput lines);
+}
 
-cleanup() {
+function cleanup
+{
 	trap '' TERM;
 	stty sane;
-	pkill -t `tty | cut -c 6-`; 
-	printf '\e[?1049l';
-	printf '\e[?25h';
-	printf '\e[0m';
-	exit;
+	pkill -t $(tty | cut -c 6-); 
+	printf "\e[H\e[J";
+	printf "\E[?1049l";
+	printf "\E[?25h";
+	printf "\E[0m";
 }
 
 function color_nick
 {
+	typeset -u hash;
+	typeset -A -i rgb;
+	typeset nick;
+	nick=${line[2]};
 	#if ! test "$name" = "$oldname";
-	#then	bgn=$(expr 70 - $bgn);
-	#	bg="\e[48;2;$bgn;$bgn;${bgn}m";
+	#then	bgn=$((70 - bgn));
+	#	bg="\E[48;2;$bgn;$bgn;${bgn}m";
 	#fi;
-	#[ -n "$oldname" ] && printf "\n";
-	hash=$(<<< $name md5sum | cut -c -6);
-	hash=$(<<<"$hash" sed -re y/abcdef/ABCDEF/ -e "s/(..)(..)(..)/\1;\2;\3/");
-	rgb=$(<<< "$hash" xargs echo "obase=10;ibase=16;" | bc);
-	test $(echo $rgb | sed 's/ /+/g' | bc) -gt 150 || {
-		max=$(echo "$rgb" | sort -rh | head -n1)
-		rgb=$(echo "$rgb" | sed -e "s/$max/$(expr 255 - $max)/" -e /"$max"/q)
+	[ ${#hashtable[$name]} -gt 0 ] || {
+		hash=$(<<< $nick md5sum);
+		hash=${hash:0:6}
+		hash=${hash/@(??)@(??)@(??)/16#\1\;16#\2\;16#\3};
+		<<< "$hash" IFS=\; read rgb[0] rgb[1] rgb[2];
+		((rgb[0] + rgb[1] + rgb[2] > 50 )) || {
+			max=$(print -f "%s\n" "${rgb[@]}" | sort -h | head -n1)
+			<<< ${rgb/$max/$((255 - $max))} read rgb[0] rgb[1] rgb[2]
+		}
+		hashtable[$nick]=$(print -f "\E[38;2;%d;%d;%dm%s\E[39m" ${rgb[@]} $nick);
 	}
-	rgb=$(<<< "$rgb" tr "\n" \; | cut -d\; -f-3);
-	cname=$(printf '\e[38;2;%sm%s\e[39m' "$rgb" "$name");
-	printf "\n${defbg}%s│\e[49m%s%s%s%s" "$time" \
-		"$lbracket" "$cname" "$rbracket" "$partmessage";
+	line[2]=${hashtable[$nick]};
 }
 
-draw() {
-	printf '\e[1;1H\e[J'
-	
+function parse
+{
+	typeset tmp;
+	tmp="$1";
+	line[0]="${tmp:0:5}";
+	line[2]="${tmp:7}";
+	if [[ "$tmp" =~ "..:.. <.+" ]];
+	then
+		line[1]="<";
+		line[3]=">";
+		line[2]="${line[2]%%\> *}";
+		line[5]="${tmp#*\> }"$'\a';
+	else
+		line[1]="- ";
+		line[3]="";
+		line[2]=${line[2]:3};
+		line[2]=${line[2]%\(*};
+		line[2]=${line[2]%% *};
+		line[5]=${tmp#*-!- * };
+	fi;
+	[[ "${line[5]}" =~ "ACT.+.?" ]] && {
+		line[1]="* ";
+		line[3]=" ";
+		line[5]=${line[4]/ACTION (.*)/\1/};
+	}
 }
 
-main() {
-	tail -n $(tput lines) -f "$channel"/out \
-	| while read -r message;
-	do	oldname="$name";
+draw()
+	while read -r message;
+	do
+		typeset -i lineoff;
+		oldname="$name";
 		message="${message:11}";
-		case $message in
-		(*:*\<*\>*)
-			time=${message:0:5};
-			lbracket='<';
-			name=${message:7};
-			name=${name%%> *};
-			rbracket='>'
-			message=${message#*>};
-			test -n "$(<<< "$message" grep "ACT")" && {
-				message=$(<<< $message sed -r 's/ACTION (.*)/\1/');
-				lbracket="* ";
-				rbracket=' ';
-			}	
-			prefix=$(expr ${#time} + 3 + ${#lbracket} + ${#name});
-			linelen=$(expr `tput cols` - $prefix);
-			partmessage=${message:0:$linelen};
-			color_nick;
-			while	lineoff=$(expr ${lineoff:-0} + $linelen);
-				partmessage=${message:$lineoff:$linelen};
-				test -n "$partmessage";
-			do	printf "${bg}\n${defbg}%s│\e[49m %s%s%s%s" "${time//?/ }" \
-				"${lbracket//?/ }" "${name//?/ }" "${rbracket//?/ }"\
-				"$partmessage";
-			done;
-			lineoff=;
-			printf '\a';
-		;;
-		(*)
-			time=${message:0:5};
-			lbracket='-';
-			rbracket=' ';
-			name=${message:10};
-			name=${name%(*};
-			name=${name%% *};
-			partmessage=${message#* * * };
-			partmessage=${message##*) };
-			#bg="$defbg";
-			color_nick;
-		;;
-		esac;
+		parse "$message";
+		prefix=$(( ${#line[0]} + ${#line[1]} + ${#line[2]} + ${#line[3]} + 5));
+		linelen=$(($(tput cols) - $prefix));
+		curnick=${line[2]};
+		color_nick;
+		lineoff=0;
+		while	line[4]="${line[5]/#{$lineoff}(?)}";
+			[ ${#line[4]} -lt $linelen ] || \
+				line[4]="${line[4]/#{1,$linelen}(?) */\1}";
+			line4len=${#line[4]};
+			[ "${line4len}" -gt 0 ];
+		do
+			[ -n "$oldnick" ] && printf "\n\r";
+			printf "%b%s│\E[0m%s%b%s %s\E[0m" "$defbg" "${line[0..4]}";
+			lineoff=$((lineoff + line4len));
+			line[0]="${line[0]//?/ }";
+			line[1]="${line[1]//?/ }";
+			line[2]="${curnick//?/ }";
+			line[3]="${line[3]//?/}";    # this is a hack, dont look too hard
+			(( topline -= 1 ));
+			(( botline -= 1 ));
+		done;
+		oldnick=$curnick
 	done;
+
+function redraw
+{
+	printf "\e[H\e[J";
+	lines=$(tput lines);
+	screen=$lines;
+	len=$(wc -l "$channel"/out | cut -d\  -f 1);
+	botline=$(max $len $lines);
+	topline=$(max 1 $((len - lines)));
+	page $topline $botline;#$((top + lines));
 }
 
-main &
-pid=$!;
+function scroll
+{
+	printf "\e[H\e[J";
+	direc=$1;
+	lines=$2;
+	len=$(wc -l "$channel"/out);
+	len=${len% *};
+	#((page = direc * lines));
+	page=$((direc * lines));
+	topline=$(max 1 $((topline + page)) );
+	botline=$(min $len $((botline + page)) );
+	#((topline = topline + page));
+	#((botline = botline + page));
+	((botline - topline == screen)) \
+		|| ((botline = (topline + screen) ));
+	page $topline $botline;
+}
 
-stty raw;
-while read -n 1 char;
-do	test "$char" = 'q' && break;
-	test "$char" = '' && break;
-done
-cleanup 2>/dev/null
+function wcl
+{
+	typeset tmp;
+	tmp=$(< $1);
+	tmp=$(("${tmp//[^
+]}" + 1));
+	printf %s ${#tmp};
+}
+
+function page	{ (( $1 * $2 > 0 )) || return; sed -n ${1},${2}p "$channel"/out | draw; }
+function follow	{ tail -n 0 -f "$channel"/out | draw; }
+function max	{ (( $1 > $2 )) && printf "%s"  $1 || printf "%s" $2; }
+function min	{ (( $1 < $2 )) && printf "%s" $1 || printf "%s" $2; }
+
+function main
+{
+	trap 'redraw' WINCH;
+	while read -n 1 char;
+	do	case $char in
+		('r')	redraw;
+			;;
+		('q')	break;
+			;;
+		('j')	scroll -1 2
+			;;
+		('k')	scroll 1 2
+			;;
+		('f')	scroll -1 $(($(tput lines) - 1));
+			;;
+		('b')	scroll 1 $(($(tput lines) - 1));
+			;;
+		('')	# FIXME: this doesn't even halfway work
+			read -t .1 seq && \
+			case seq in
+			('[5~')
+				scroll 1 $(($(tput lines) - 1));
+				break;
+				;;
+			('[6~')
+				scroll -1 $(($(tput lines) - 1));
+				break;
+				;;
+			esac;
+			;;
+		('')	break;
+			;;
+		esac
+	done
+}
+
+init;
+redraw;
+follow& 2>/dev/null
+main;
+cleanup 2>/dev/null;

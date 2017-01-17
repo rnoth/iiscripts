@@ -1,10 +1,11 @@
-#!/bin/ksh -x
+#!/bin/ksh
 
-dmenu='-n'
+dmenu=''
 dir=/tmp
 cd "$dir"
 
-channels=*.*.*/*/out
+#channels=*.*.*/*/out
+channels=*/*/out
 chanstat=$(stat -c "%Y %n" $channels)
 
 echo $chanstat
