@@ -4,7 +4,16 @@ iimenu.sh:
 	- press escape to exit
 iiview.sh
 	- somewhat buggy
-	- scrolling does not work (though 'b' can pass in a pinch
+	- scrolling does not work (though 'b' can pass in a pinch)
 	- written in ksh93, rather than portable POSIX sh
 	- I honestly don't know what a good chunk of this code is doing
+iiwatch.sh(wip):
+	- probably buggy
+	- depends on wendy (https://git.z3bra.org/wendy)
+	- depends on a notification program I haven't yet released
+iiformat.lex(wip):
+	- iiview replacement
+	- no features
+	- prints the entire log
+	- inotify logic is bugged
 		
